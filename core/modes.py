@@ -3,6 +3,7 @@ Modos de operação do NexCoder
 """
 import json
 import subprocess
+import time
 from pathlib import Path
 from .utils import (G, Y, C, R, BO, DM, NC, sep, ask, 
                    bytes_to_human, encontrar_videos, notificar_windows, VIDEO_EXTS)
@@ -11,6 +12,7 @@ from .analyzer import analisar_video
 from .encoder import processar_arquivo, pasta_saida
 
 def modo_telegram(config_mgr, telegram, watch_folder):
+    """Modo principal: comprimir para Telegram"""
     print(f"\n{C}{BO}  ━━━━ 🎬 Comprimir para Telegram ━━━━{NC}")
     
     videos = encontrar_videos()
@@ -30,16 +32,24 @@ def modo_telegram(config_mgr, telegram, watch_folder):
     saida = pasta_saida(arq, config_mgr, tipo_conteudo, info_conteudo)
     log = str(saida / "nexcoder.log")
 
-    sz0, sz2, sucesso, _ = processar_arquivo(
-        arq, saida, log, config_mgr, telegram,
-        tipo_conteudo, info_conteudo, preview=True
-    )
-    
-    print(f"\n  Salvo em: {Y}{saida}{NC}\n")
-    if sucesso:
-        notificar_windows("NexCoder ✓ Concluído", f"{Path(arq).name} · {bytes_to_human(sz2)}")
+    try:
+        sz0, sz2, sucesso, _ = processar_arquivo(
+            arq, saida, log, config_mgr, telegram,
+            tipo_conteudo, info_conteudo, preview=True
+        )
+        
+        if sucesso and sz2 > 0:
+            print(f"\n  {G}✓ Salvo em: {Y}{saida}{NC}\n")
+            notificar_windows("NexCoder ✓ Concluído", f"{Path(arq).name} · {bytes_to_human(sz2)}")
+        else:
+            print(f"\n  {Y}Operação cancelada ou arquivo já existe.{NC}\n")
+    except Exception as e:
+        print(f"\n  {R}[✗] Erro inesperado: {e}{NC}\n")
+        print(f"  {DM}Voltando ao menu principal...{NC}")
+        time.sleep(2)
 
 def modo_info():
+    """Mostra informações detalhadas do vídeo"""
     print(f"\n{C}{BO}  ━━━━ ℹ️  Info do Vídeo ━━━━{NC}\n")
     videos = encontrar_videos()
     arq = listar_e_escolher(videos)
@@ -79,6 +89,7 @@ def modo_info():
     print()
 
 def modo_config(config_mgr, telegram, watch_folder):
+    """Menu de configurações"""
     while True:
         print(f"\n{C}{BO}  ━━━━ ⚙️  Configurações ━━━━{NC}\n")
         print(f"  {C}[1]{NC} Bitrate áudio: {BO}{config_mgr.get('audio_bitrate', '192k')}{NC}")
@@ -144,6 +155,7 @@ def modo_config(config_mgr, telegram, watch_folder):
             break
 
 def modo_historico():
+    """Mostra histórico de processamentos"""
     from .config import ConfigManager
     config_mgr = ConfigManager()
     hist = config_mgr.get_historico(15)
@@ -165,8 +177,8 @@ def modo_historico():
         print(f"\n  {Y}Nenhum histórico.{NC}\n")
 
 def listar_e_escolher(videos):
-    # Importa as cores necessárias no início da função
-    from .utils import M, B
+    """Lista vídeos e permite escolher um"""
+    from .utils import M, B  # Importa cores adicionais
     
     if not videos:
         print(f"  {Y}Nenhum vídeo encontrado.{NC}")

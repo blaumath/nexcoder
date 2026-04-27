@@ -180,6 +180,7 @@ def encode(input_file, output_file, vbitrate, log_file, config_mgr,
 
     use_cpu = config_mgr.use_cpu
     encoder_gpu = config_mgr.encoder_gpu
+    audio_br = config_mgr.get('audio_bitrate', '192k')
     
     if not use_cpu and encoder_gpu == "hevc_nvenc":
         vid = ["-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr",
@@ -189,8 +190,6 @@ def encode(input_file, output_file, vbitrate, log_file, config_mgr,
         vid = ["-c:v", "libx265", "-crf", str(cq), "-preset", "slow",
                "-b:v", "0"] + rate_flags + \
               ["-map_metadata", "0", "-movflags", "+faststart"]
-
-    audio_br = config_mgr.get('audio_bitrate', '192k')
     
     prog = tempfile.mktemp(suffix='.txt')
     cmd = (
@@ -314,38 +313,55 @@ def processar_arquivo(arq, saida_dir, log, config_mgr, telegram,
     dur = get_duracao(arq)
     print(f"  Duração  : {C}{dur//60}min{NC}")
 
+    # Modo áudio
     if modo_audio_fixo is not None:
         leg = modo_audio_fixo
         sufixo = "_leg" if leg.get('audio_override_idx') else "_dub"
     else:
-        if tipo_conteudo in ('serie', 'anime') and sugerir_modo_audio(tipo_conteudo, config_mgr) != 'perguntar':
-            leg = decidir_modo_audio(str(arq), tipo_conteudo, config_mgr)
-        else:
-            leg = decidir_modo_audio(str(arq), tipo_conteudo, config_mgr)
+        # Para séries: modo automático = dublado (não pergunta)
+        # Para animes: modo automático = legendado
+        # Para filmes: pergunta (ou configurado)
+        preferencia = sugerir_modo_audio(tipo_conteudo, config_mgr)
+        
+        if preferencia == 'perguntar' and tipo_conteudo in ('serie', 'anime'):
+            # Força o padrão para séries/animes
+            if tipo_conteudo == 'serie':
+                preferencia = 'dublado'
+            elif tipo_conteudo == 'anime':
+                preferencia = 'legendado'
+        
+        leg = decidir_modo_audio(str(arq), tipo_conteudo, config_mgr)
         sufixo = "_leg" if leg.get('audio_override_idx') else "_dub"
 
     nome_saida = nome_arquivo_saida(arq, tipo_conteudo, info_conteudo, sufixo)
     out = saida_dir / nome_saida
 
+    # Verifica se arquivo já existe
     if out.exists():
         if batch_total > 1:
+            sz2 = out.stat().st_size
             print(f"  {G}[✓] Já convertido — pulando{NC}")
-            return sz0, out.stat().st_size, True, tipo_conteudo
+            return sz0, sz2, True, tipo_conteudo
         else:
             print(f"  {Y}[!] Já existe: {out.name}{NC}")
             if not ask("Sobrescrever?", default="n"):
-                return sz0, out.stat().st_size, True, tipo_conteudo
+                print(f"  {Y}  → Cancelado. Voltando ao menu...{NC}")
+                time.sleep(1)
+                return sz0, out.stat().st_size, True, tipo_conteudo  # Retorna True para não dar erro
 
+    # CQ automático
     limite_tg = config_mgr.get_int('limite_telegram', 1945) * 1024 * 1024
     CQ, cq_motivo = cq_automatico(arq, tipo_conteudo, limite_tg)
     print(f"  {C}CQ automático: {BO}{CQ}{NC}  {DM}{cq_motivo}{NC}")
 
+    # Bitrate limitado
     vbitrate = ""
     if sz0 >= limite_tg * 0.8:
         vkbps = max(int((limite_tg - 24000*(dur or 7200)) / (dur or 7200) / 1000), 1000)
         vbitrate = f"{vkbps}k"
         print(f"  {C}Bitrate limitado: {vkbps}kbps (modo Telegram){NC}")
 
+    # Mostra encoder
     enc = f"{config_mgr.gpu_vendor} {config_mgr.encoder_gpu} 🚀" if not config_mgr.use_cpu else "CPU x265"
     print(f"  {DM}{config_mgr.get('audio_bitrate', '192k')} stereo | {enc}{NC}")
 
@@ -366,6 +382,7 @@ def processar_arquivo(arq, saida_dir, log, config_mgr, telegram,
             print(f"  {DM}[📤] Upload desativado (modo: nunca){NC}")
     print()
 
+    # Inicia encode
     t0 = time.time()
     st = encode(str(arq), str(out), vbitrate, log, config_mgr,
                 leg['sub_action'], leg['sub_file'],
@@ -378,8 +395,8 @@ def processar_arquivo(arq, saida_dir, log, config_mgr, telegram,
         sz2 = out.stat().st_size
         r = int((sz0 - sz2) * 100 / sz0)
         
+        # Salva calibração e histórico
         config_mgr.add_calibracao(CQ, dur, sz2)
-        
         config_mgr.add_historico({
             'data': datetime.now().isoformat(),
             'arquivo': arq.name,
@@ -396,9 +413,11 @@ def processar_arquivo(arq, saida_dir, log, config_mgr, telegram,
         print(f"  Final    : {G}{bytes_to_human(sz2)}{NC}  ({G}-{r}%{NC})")
         print(f"  Tempo    : {dt//60}min {dt%60}s")
         
+        # Verifica integridade
         if verificar_integridade(out):
             print(f"  {G}✓ Arquivo íntegro{NC}")
             
+            # Upload Telegram
             if enviar_telegram and telegram.enabled:
                 nome_grupo = telegram.get_nome_grupo(tipo_conteudo)
                 print(f"  {C}[📤] Enviando para {nome_grupo}...{NC}")

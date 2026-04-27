@@ -165,6 +165,9 @@ def modo_historico():
         print(f"\n  {Y}Nenhum histórico.{NC}\n")
 
 def listar_e_escolher(videos):
+    # Importa as cores necessárias no início da função
+    from .utils import M, B
+    
     if not videos:
         print(f"  {Y}Nenhum vídeo encontrado.{NC}")
         return None
@@ -190,7 +193,6 @@ def listar_e_escolher(videos):
             icone = f"{C}📺{NC}"
         else:
             icone = f"{B}🎬{NC}"
-        from .utils import M, B
         print(f"    {C}[{idx}]{NC} {icone} {f.name}  {DM}({R}{bytes_to_human(sz)}{DM}){NC}")
         mapa[idx] = f
 

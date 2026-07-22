@@ -205,8 +205,28 @@ def encode(input_file, output_file, vbitrate, log_file, config_mgr,
         proc = subprocess.Popen(cmd, stderr=lf, stdout=subprocess.DEVNULL)
 
     t0 = time.time()
-    BAR = 30
+    BAR = 28
     speeds = []
+
+    def _render_bar(pct, eta_m, eta_s, speed_str, fps, sz_now, recursos):
+        fill = int(pct * BAR / 100)
+        bar = '█' * fill + '░' * (BAR - fill)
+        eta_str = f"{eta_m}m{eta_s:02d}s" if (eta_m or eta_s) else "--:--"
+        rec = f" | {recursos}" if recursos else ""
+        linha = (
+            f"  \033[32m[{bar}]\033[0m \033[1m{pct:3d}%\033[0m"
+            f"  ETA {eta_str}"
+            f"  {speed_str:>6}"
+            f"  {fps:>5} fps"
+            f"  {sz_now:<8}"
+            f"{rec}"
+        )
+        # \033[2K limpa a linha inteira antes de reescrever — sem lixo visual
+        sys.stdout.write(f"\033[2K\r{linha}")
+        sys.stdout.flush()
+
+    import sys as _sys_ref
+    import sys
 
     while proc.poll() is None:
         time.sleep(1.0)
@@ -224,7 +244,7 @@ def encode(input_file, output_file, vbitrate, log_file, config_mgr,
         fps = info.get('fps', '-')
         pct = eta_m = eta_s = 0
 
-        if spd and spd != 'N/A' and 'x' in spd:
+        if spd and spd not in ('N/A', '-') and 'x' in spd:
             try:
                 speeds.append(float(spd.replace('x', '')))
                 if len(speeds) > 10:
@@ -237,28 +257,25 @@ def encode(input_file, output_file, vbitrate, log_file, config_mgr,
             pct = min(int(us // 1_000_000 * 100 / dur), 100)
             if pct > 0:
                 eta = max(int(el * 100 / pct - el), 0)
-                eta_m = eta // 60
-                eta_s = eta % 60
+                eta_m, eta_s = eta // 60, eta % 60
 
-        bar = '█' * int(pct * BAR / 100) + '░' * (BAR - int(pct * BAR / 100))
         sz_now = ""
         try:
             sz_now = bytes_to_human(Path(str(output_file)).stat().st_size)
         except:
             pass
-        
-        recursos = get_recursos()
-        recursos_str = f"  [{recursos}]" if recursos else ""
+
         avg_speed = sum(speeds) / len(speeds) if speeds else 0
         speed_str = f"{avg_speed:.1f}x" if avg_speed > 0 else spd
-        
-        print(f"\r  \033[32m[{bar}]\033[0m \033[1m{pct:3d}%\033[0m  "
-              f"ETA: {eta_m}min{eta_s:02d}s  {speed_str}  fps: {fps:<5}  "
-              f"{sz_now}{recursos_str}",
-              end='', flush=True)
+        recursos = get_recursos()
+
+        _render_bar(pct, eta_m, eta_s, speed_str, fps, sz_now, recursos)
 
     proc.wait()
-    print(f"\r  \033[32m[{'█'*BAR}]\033[0m \033[1m100%\033[0m  Concluído!{' '*20}")
+    # Linha final: 100% limpa
+    fill = '█' * BAR
+    sys.stdout.write(f"\033[2K\r  \033[32m[{fill}]\033[0m \033[1m100%\033[0m  Concluído!\n")
+    sys.stdout.flush()
 
     try:
         os.unlink(prog)
